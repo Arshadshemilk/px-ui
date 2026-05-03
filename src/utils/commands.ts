@@ -63,11 +63,32 @@ Type 'help' to see available commands.`;
       }
 
     default:
-      // Mock AI response logic for non-commands
-      return `[Llama-3] ${prompt.length > 20 ? 'Analyzing your request...' : 'Processing...'}
-      
-Based on my knowledge base, here is a response to: "${prompt}"
+      try {
+        const response = await fetch('http://localhost:8080/completion', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt: `### Instruction: ${prompt}\n\n### Response:`,
+            n_predict: 400,
+            temperature: 0.7,
+            stop: ['### Instruction:', 'User:', 'AI:', '\n\n'],
+          }),
+        });
 
-This is a simulated AI response from the EA-llama.cpp engine. In a production environment, this would call a local or remote LLM API. The terminal is now purely chat-focused.`;
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.content || 'No response from model.';
+      } catch (error) {
+        console.error('Llama.cpp connection error:', error);
+        return `[ERROR] Could not connect to llama.cpp on port 8080. 
+        
+Make sure the server is running with:
+'./llama-server -m models/llama-3-8b.gguf --port 8080'`;
+      }
   }
 };

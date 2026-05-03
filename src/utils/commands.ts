@@ -1,5 +1,6 @@
 import packageJson from '../../package.json';
 import { todoManager } from './todo';
+import { pushLog, updateTimings } from '../stores/system';
 
 export const handleChat = async (prompt: string): Promise<string> => {
   const [cmd, ...args] = prompt.trim().split(' ');
@@ -64,6 +65,7 @@ Type 'help' to see available commands.`;
 
     default:
       try {
+        pushLog(`Processing request: ${prompt.substring(0, 30)}...`);
         const response = await fetch('https://ideal-acorn-69vvg4gqpg4wfrwr7-8080.app.github.dev/completion', {
           method: 'POST',
           headers: {
@@ -82,13 +84,24 @@ Type 'help' to see available commands.`;
         }
 
         const data = await response.json();
+        
+        if (data.timings) {
+          updateTimings(data.timings.predicted_ms, data.timings.predicted_n);
+          pushLog(`Response received: ${data.timings.predicted_n} tokens in ${data.timings.predicted_ms.toFixed(0)}ms`);
+        }
+
         return data.content || 'No response from model.';
       } catch (error) {
         console.error('Llama.cpp connection error:', error);
-        return `[ERROR] Could not connect to llama.cpp on port 8080. 
+        pushLog(`[ERROR] Connection failed: ${error}`);
+        return `[ERROR] Could not connect to the remote llama.cpp server.
         
-Make sure the server is running with:
-'./llama-server -m models/llama-3-8b.gguf --port 8080'`;
+Status: 502 Bad Gateway (The URL is reachable, but the server inside the workspace isn't responding).
+
+Checklist:
+1. Is llama-server running in the Codespace?
+2. Did you use '--host 0.0.0.0 --port 8080'?
+3. Is port 8080 set to 'Public' in the Ports tab?`;
       }
   }
 };

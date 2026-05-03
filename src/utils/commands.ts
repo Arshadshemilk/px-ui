@@ -98,46 +98,55 @@ Type 'help' to see available commands.`;
         let fullContent = '';
         let buffer = '';
 
+        const processLine = (line: string) => {
+          try {
+            const jsonStr = line.startsWith('data: ') ? line.slice(6) : line.slice(5);
+            if (jsonStr === '[DONE]') return;
+
+            const data = JSON.parse(jsonStr);
+            if (data.content) {
+              fullContent += data.content;
+              history.update(h => {
+                const newHistory = [...h];
+                newHistory[historyIdx].outputs = [fullContent];
+                return newHistory;
+              });
+            }
+            
+            if (data.stop && data.timings) {
+              const evalMs = data.timings.predicted_ms || data.timings.prompt_ms || 0;
+              const n = data.timings.predicted_n || data.timings.prompt_n || 0;
+              if (evalMs > 0 && n > 0) {
+                updateTimings(evalMs, n);
+                pushLog(`Stream finished: ${n} tokens in ${evalMs.toFixed(0)}ms (${(n / (evalMs / 1000)).toFixed(2)} t/s)`);
+              }
+            }
+          } catch (e) {
+            // Partial JSON or other error, skip
+          }
+        };
+
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; 
           
-          for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine.startsWith('data:')) continue;
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
             
-            try {
-              // Handle both "data: {...}" and "data:{...}"
-              const jsonStr = trimmedLine.startsWith('data: ') 
-                ? trimmedLine.slice(6) 
-                : trimmedLine.slice(5);
-
-              const data = JSON.parse(jsonStr);
-              if (data.content) {
-                fullContent += data.content;
-                history.update(h => {
-                  const newHistory = [...h];
-                  newHistory[historyIdx].outputs = [fullContent];
-                  return newHistory;
-                });
+            let boundary;
+            while ((boundary = buffer.indexOf('\n')) !== -1) {
+              const line = buffer.slice(0, boundary).trim();
+              buffer = buffer.slice(boundary + 1);
+              if (line.startsWith('data:')) {
+                processLine(line);
               }
-              
-              if (data.stop && data.timings) {
-                const evalMs = data.timings.predicted_ms || data.timings.prompt_ms || 0;
-                const n = data.timings.predicted_n || data.timings.prompt_n || 0;
-                
-                if (evalMs > 0 && n > 0) {
-                  updateTimings(evalMs, n);
-                  pushLog(`Stream finished: ${n} tokens in ${evalMs.toFixed(0)}ms (${(n / (evalMs / 1000)).toFixed(2)} t/s)`);
-                }
-              }
-            } catch (e) {
-              console.warn('Failed to parse SSE line:', trimmedLine);
             }
+          }
+
+          if (done) {
+            if (buffer.trim().startsWith('data:')) {
+              processLine(buffer.trim());
+            }
+            break;
           }
         }
         return 'STREAMING_COMPLETE';

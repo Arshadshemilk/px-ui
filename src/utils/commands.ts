@@ -104,12 +104,19 @@ Type 'help' to see available commands.`;
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Keep the partial line in the buffer
+          buffer = lines.pop() || ''; 
           
           for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
+            const trimmedLine = line.trim();
+            if (!trimmedLine.startsWith('data:')) continue;
+            
             try {
-              const data = JSON.parse(line.slice(6));
+              // Handle both "data: {...}" and "data:{...}"
+              const jsonStr = trimmedLine.startsWith('data: ') 
+                ? trimmedLine.slice(6) 
+                : trimmedLine.slice(5);
+
+              const data = JSON.parse(jsonStr);
               if (data.content) {
                 fullContent += data.content;
                 history.update(h => {
@@ -129,7 +136,7 @@ Type 'help' to see available commands.`;
                 }
               }
             } catch (e) {
-              // Ignore invalid JSON
+              console.warn('Failed to parse SSE line:', trimmedLine);
             }
           }
         }

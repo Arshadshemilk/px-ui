@@ -64,7 +64,7 @@ Type 'help' to see available commands.`;
 
     default:
       try {
-        const response = await fetch('http://localhost:8080/completion', {
+        const response = await fetch('https://ideal-acorn-69vvg4gqpg4wfrwr7-8080.app.github.dev/completion', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

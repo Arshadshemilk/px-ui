@@ -1,8 +1,9 @@
 import packageJson from '../../package.json';
 import { todoManager } from './todo';
 import { pushLog, updateTimings } from '../stores/system';
+import { history } from '../stores/history';
 
-export const handleChat = async (prompt: string): Promise<string> => {
+export const handleChat = async (prompt: string): Promise<string | void> => {
   const [cmd, ...args] = prompt.trim().split(' ');
   const command = cmd.toLowerCase();
 
@@ -65,32 +66,74 @@ Type 'help' to see available commands.`;
 
     default:
       try {
-        pushLog(`Processing request: ${prompt.substring(0, 30)}...`);
+        pushLog(`Streaming request: ${prompt.substring(0, 30)}...`);
+        
+        // Add user command to history and prepare placeholder for AI response
+        history.update(h => [...h, { command: prompt, outputs: [''] }]);
+        const historyIdx = (await new Promise(r => {
+          const unsub = history.subscribe(h => {
+            r(h.length - 1);
+            unsub();
+          });
+        })) as number;
+
         const response = await fetch('https://ideal-acorn-69vvg4gqpg4wfrwr7-8080.app.github.dev/completion', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: `### Instruction: ${prompt}\n\n### Response:`,
             n_predict: 400,
             temperature: 0.7,
             stop: ['### Instruction:', 'User:', 'AI:', '\n\n'],
+            stream: true,
           }),
         });
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
-        if (data.timings) {
-          updateTimings(data.timings.predicted_ms, data.timings.predicted_n);
-          pushLog(`Response received: ${data.timings.predicted_n} tokens in ${data.timings.predicted_ms.toFixed(0)}ms`);
-        }
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('ReadableStream not supported');
+        
+        const decoder = new TextDecoder();
+        let fullContent = '';
+        let buffer = '';
 
-        return data.content || 'No response from model.';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep the partial line in the buffer
+          
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.content) {
+                fullContent += data.content;
+                history.update(h => {
+                  const newHistory = [...h];
+                  newHistory[historyIdx].outputs = [fullContent];
+                  return newHistory;
+                });
+              }
+              
+              if (data.stop && data.timings) {
+                const evalMs = data.timings.predicted_ms || data.timings.prompt_ms || 0;
+                const n = data.timings.predicted_n || data.timings.prompt_n || 0;
+                
+                if (evalMs > 0 && n > 0) {
+                  updateTimings(evalMs, n);
+                  pushLog(`Stream finished: ${n} tokens in ${evalMs.toFixed(0)}ms (${(n / (evalMs / 1000)).toFixed(2)} t/s)`);
+                }
+              }
+            } catch (e) {
+              // Ignore invalid JSON
+            }
+          }
+        }
+        return 'STREAMING_COMPLETE';
       } catch (error) {
         console.error('Llama.cpp connection error:', error);
         pushLog(`[ERROR] Connection failed: ${error}`);

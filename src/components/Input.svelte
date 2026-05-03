@@ -17,23 +17,32 @@
     input.scrollIntoView({ behavior: 'smooth', block: 'end' });
   });
 
+  let isLoading = false;
+
   const handleKeyDown = async (event: KeyboardEvent) => {
     if (event.key === 'Enter') {
       const prompt = command.trim();
 
-      if (!prompt) {
+      if (!prompt || isLoading) {
         return;
       }
 
+      isLoading = true;
+      const currentCommand = command;
+      command = '';
+      
       const output = await handleChat(prompt);
 
       if (output === 'CLEAR_COMMAND') {
         $history = [];
-      } else {
-        $history = [...$history, { command: prompt, outputs: [output] }];
+      } else if (output === 'STREAMING_COMPLETE') {
+        // Chat streaming is already handled by handleChat updating the store
+      } else if (output) {
+        // Standard command response
+        $history = [...$history, { command: currentCommand, outputs: [output] }];
       }
 
-      command = '';
+      isLoading = false;
       historyIndex = -1;
     } else if (event.key === 'ArrowUp') {
       if (historyIndex < $history.length - 1) {
@@ -63,12 +72,13 @@
     id="command-input"
     name="command-input"
     aria-label="Chat input"
-    class="w-full bg-transparent outline-none"
+    class={`w-full bg-transparent outline-none ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
     type="text"
     style={`color: ${$theme.foreground}`}
     bind:value={command}
     on:keydown={handleKeyDown}
     bind:this={input}
+    disabled={isLoading}
     autocomplete="off"
     spellcheck="false"
   />
